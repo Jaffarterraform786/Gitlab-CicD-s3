@@ -1,0 +1,83 @@
+include:
+  - template: Terraform/Base.gitlab-ci.yml  # https://gitlab.com/gitlab-org/gitlab/blob/master/lib/gitlab/ci/templates/Terraform/Base.gitlab-ci.yml
+  - template: Jobs/SAST-IaC.gitlab-ci.yml   # https://gitlab.com/gitlab-org/gitlab/blob/master/lib/gitlab/ci/templates/Jobs/SAST-IaC.gitlab-ci.yml
+stages:
+  - test
+  - init
+  - validate
+  - plan
+  - show
+  - apply
+  - destroy
+
+checkov:
+  stage: test
+  allow_failure: true  # True for AutoDevOps compatibility
+  image:
+    name: bridgecrew/checkov:latest
+  script:
+    - checkov -d . -o json | tee checkov.test.json
+  artifacts:
+    when: always
+    reports:
+      junit: "checkov.test.json"
+    paths:
+      - "checkov.test.json"
+
+init:
+  stage: init
+  script:
+    - terraform init 
+    
+validate:
+  stage: validate
+  script:
+    - gitlab-terraform validate
+
+plan:
+  stage: plan
+  script:
+    - terraform init -migrate-state
+    - terraform init -reconfigure
+    - terraform plan -out "planfile"
+   
+
+  dependencies:
+    - validate
+  artifacts:
+    paths:
+      - planfile
+
+show:
+  stage: show
+  script:
+    - rm -f planfile
+    - cp $CI_PROJECT_DIR/planfile ./
+    - terraform show planfile
+  dependencies:
+    - plan
+  only:
+    refs:
+      - feature_cicd
+
+################# Apply to dev #################
+apply:
+  stage: apply
+  script:
+    - gitlab-terraform init
+    - gitlab-terraform plan
+    - gitlab-terraform apply 
+  dependencies:
+    - plan
+  when: manual
+
+################# Destroy to dev #################
+
+destroy:
+  stage: destroy
+  script:
+    - gitlab-terraform destroy
+  dependencies:
+    - apply
+  when: manual
+
